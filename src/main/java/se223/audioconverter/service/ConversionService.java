@@ -1,8 +1,6 @@
 package se223.audioconverter.service;
 
-import se223.audioconverter.core.AudioConverter;
-import se223.audioconverter.core.MockAudioConverter;
-import se223.audioconverter.core.ProgressCallback;
+import se223.audioconverter.core.*;
 import se223.audioconverter.exception.ConversionException;
 import se223.audioconverter.model.ConversionRequest;
 import se223.audioconverter.model.ConversionResult;
@@ -17,28 +15,44 @@ public class ConversionService {
 
     private final AudioConverter converter;
 
+    // 🔹 Add these two fields:
+    private final boolean usingFFmpeg;
+    private final String ffmpegInfo;
+
     private ConversionService() {
-        this.converter =
-                new MockAudioConverter(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+        // Try real FFmpeg first, fall back to mock
+        var maybe = FFmpegAudioConverter.createDefault();
+        if (maybe.isPresent()) {
+            this.converter = maybe.get();
+            this.usingFFmpeg = true;
+            this.ffmpegInfo = "FFmpeg located successfully (PATH / FFMPEG_HOME / ffmpeg/bin)";
+        } else {
+            this.converter = new MockAudioConverter(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+            this.usingFFmpeg = false;
+            this.ffmpegInfo = "FFmpeg not found; running in mock simulation mode.";
+        }
     }
 
-    // ⬇️ No 'throws' here anymore
+    // No 'throws' here: we wrap any sync failure into a failed future.
     public CompletableFuture<List<ConversionResult>> convert(
             List<ConversionRequest> requests, ProgressCallback progress) {
+
         try {
-            return converter.convertAll(requests, progress); // may throw synchronously
+            ConversionValidator.validateRequests(requests);
+            return converter.convertAll(requests, progress);
         } catch (ConversionException e) {
-            return CompletableFuture.failedFuture(e);        // Java 9+, you're on JDK 21
+            return CompletableFuture.failedFuture(e);
         }
     }
 
+    /** Close background resources (thread pools, etc.) */
     public void close() {
-        if (converter instanceof MockAudioConverter mock) {
-            mock.close();
-        }
+        converter.close();
     }
 
-    public AudioConverter getConverter() {
-        return converter;
-    }
+    public AudioConverter getConverter() { return converter; }
+
+    // 🔹 Add these two methods:
+    public boolean isUsingFFmpeg() { return usingFFmpeg; }
+    public String getFfmpegInfo() { return ffmpegInfo; }
 }

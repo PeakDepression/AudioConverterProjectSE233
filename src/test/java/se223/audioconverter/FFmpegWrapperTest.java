@@ -8,37 +8,78 @@ import net.bramp.ffmpeg.progress.ProgressListener;
 import net.bramp.ffmpeg.probe.FFmpegFormat;
 import net.bramp.ffmpeg.probe.FFmpegProbeResult;
 import net.bramp.ffmpeg.probe.FFmpegStream;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
+import se223.audioconverter.util.FFmpegLocator;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.*;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+/**
+ * FFmpeg integration tests that auto-skip if ffmpeg/ffprobe or the test input are not available.
+ */
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class FFmpegWrapperTest {
 
-    private static final String FFMPEG = "ffmpeg/ffmpeg.exe";
-    private static final String FFPROBE = "ffmpeg/bin/ffprobe.exe";
+    private static Path FFMPEG;
+    private static Path FFPROBE;
 
-    private static final String INPUT_FILE = "Input/input.mp4";       // your test input
-    private static final String OUTPUT_DIR = "output";                // folder for results
-    private static final String OUTPUT_FILE = OUTPUT_DIR + "/output.mp4";
+    // Prefer a small input you place under project root (or test resources)
+    private static final String DEFAULT_INPUT = "Input/input.mp4";
+
+    @TempDir
+    Path tempDir; // JUnit creates and cleans this for us
+
+    @BeforeAll
+    static void resolveTools() {
+        Optional<Path> ff = FFmpegLocator.findFfmpeg();
+        Optional<Path> fp = FFmpegLocator.findFfprobe();
+
+        Assumptions.assumeTrue(ff.isPresent() && fp.isPresent(),
+                "FFmpeg/ffprobe not available on PATH or in expected locations; skipping tests.");
+
+        FFMPEG = ff.get();
+        FFPROBE = fp.get();
+    }
+
+    private static Path resolveInput() {
+        // 1) Try project-root relative
+        Path p1 = Paths.get(DEFAULT_INPUT);
+        if (Files.isRegularFile(p1)) return p1;
+
+        // 2) Try test resources (src/test/resources/Input/input.mp4)
+        try {
+            var url = FFmpegWrapperTest.class.getResource("/Input/input.mp4");
+            if (url != null) {
+                Path p = Paths.get(url.toURI());
+                if (Files.isRegularFile(p)) return p;
+            }
+        } catch (Exception ignored) {}
+
+        return null;
+    }
 
     @Test
-    public void testSimpleConversion() {
-        assertDoesNotThrow(() -> {
-            // Ensure output directory exists
-            Files.createDirectories(Paths.get(OUTPUT_DIR));
+    @Order(1)
+    void testSimpleConversion() {
+        Path input = resolveInput();
+        Assumptions.assumeTrue(input != null && Files.isRegularFile(input),
+                "Test input file not found at " + DEFAULT_INPUT + " or in test resources; skipping.");
 
-            FFmpeg ffmpeg = new FFmpeg(FFMPEG);
-            FFprobe ffprobe = new FFprobe(FFPROBE);
+        Path outFile = tempDir.resolve("output.mp4");
+
+        assertDoesNotThrow(() -> {
+            FFmpeg ffmpeg = new FFmpeg(FFMPEG.toString());
+            FFprobe ffprobe = new FFprobe(FFPROBE.toString());
 
             FFmpegBuilder builder = new FFmpegBuilder()
-                    .setInput(INPUT_FILE)
+                    .setInput(input.toString())
                     .overrideOutputFiles(true)
-                    .addOutput(OUTPUT_FILE)
+                    .addOutput(outFile.toString())
                     .setFormat("mp4")
                     .setVideoCodec("libx264")
                     .setVideoResolution(640, 480)
@@ -48,57 +89,61 @@ public class FFmpegWrapperTest {
                     .setAudioSampleRate(48_000)
                     .done();
 
-            FFmpegExecutor executor = new FFmpegExecutor(ffmpeg, ffprobe);
-            FFmpegJob job = executor.createJob(builder);
-            job.run();
+            new FFmpegExecutor(ffmpeg, ffprobe).createJob(builder).run();
 
-            System.out.println("✅ Conversion finished!");
+            Assertions.assertTrue(Files.exists(outFile),
+                    "Expected output not created: " + outFile);
         });
     }
 
     @Test
-    public void testProbeFile() throws IOException {
-        FFprobe ffprobe = new FFprobe(FFPROBE);
-        FFmpegProbeResult probeResult = ffprobe.probe(INPUT_FILE);
+    @Order(2)
+    void testProbeFile() throws IOException {
+        Path input = resolveInput();
+        Assumptions.assumeTrue(input != null && Files.isRegularFile(input),
+                "Test input file not found; skipping.");
+
+        FFprobe ffprobe = new FFprobe(FFPROBE.toString());
+        FFmpegProbeResult probeResult = ffprobe.probe(input.toString());
 
         FFmpegFormat format = probeResult.getFormat();
         System.out.printf("File: %s ; Format: %s ; Duration: %.3fs%n",
-                format.filename,
-                format.format_long_name,
-                format.duration);
+                format.filename, format.format_long_name, format.duration);
 
-        FFmpegStream stream = probeResult.getStreams().get(0);
-        System.out.printf("Codec: %s ; Width: %dpx ; Height: %dpx%n",
-                stream.codec_long_name,
-                stream.width,
-                stream.height);
+        // Guard: some files may have only audio or only video
+        if (!probeResult.getStreams().isEmpty()) {
+            FFmpegStream stream = probeResult.getStreams().get(0);
+            System.out.printf("Codec: %s ; Width: %dpx ; Height: %dpx%n",
+                    stream.codec_long_name, stream.width, stream.height);
+        }
     }
 
     @Test
-    public void testConversionWithProgress() throws IOException {
-        // Ensure output directory exists
-        Files.createDirectories(Paths.get(OUTPUT_DIR));
+    @Order(3)
+    void testConversionWithProgress() throws IOException {
+        Path input = resolveInput();
+        Assumptions.assumeTrue(input != null && Files.isRegularFile(input),
+                "Test input file not found; skipping.");
 
-        FFmpeg ffmpeg = new FFmpeg(FFMPEG);
-        FFprobe ffprobe = new FFprobe(FFPROBE);
+        Path outFile = tempDir.resolve("progress_output.mp4");
 
-        FFmpegProbeResult in = ffprobe.probe(INPUT_FILE);
+        FFmpeg ffmpeg = new FFmpeg(FFMPEG.toString());
+        FFprobe ffprobe = new FFprobe(FFPROBE.toString());
+
+        FFmpegProbeResult in = ffprobe.probe(input.toString());
+        final double duration_ns = Math.max(1, in.getFormat().duration * TimeUnit.SECONDS.toNanos(1));
 
         FFmpegBuilder builder = new FFmpegBuilder()
                 .setInput(in)
                 .overrideOutputFiles(true)
-                .addOutput(OUTPUT_FILE)
+                .addOutput(outFile.toString())
                 .done();
 
-        FFmpegExecutor executor = new FFmpegExecutor(ffmpeg, ffprobe);
-        final double duration_ns = in.getFormat().duration * TimeUnit.SECONDS.toNanos(1);
-
-        FFmpegJob job = executor.createJob(builder, new ProgressListener() {
-            @Override
-            public void progress(Progress progress) {
-                double percentage = progress.out_time_ns / duration_ns;
+        FFmpegJob job = new FFmpegExecutor(ffmpeg, ffprobe).createJob(builder, new ProgressListener() {
+            @Override public void progress(Progress progress) {
+                double pct = Math.min(1.0, progress.out_time_ns / duration_ns);
                 System.out.printf("[%.0f%%] frame:%d time:%s fps:%.0f speed:%.2fx%n",
-                        percentage * 100,
+                        pct * 100,
                         progress.frame,
                         FFmpegUtils.toTimecode(progress.out_time_ns, TimeUnit.NANOSECONDS),
                         progress.fps.doubleValue(),
@@ -107,5 +152,6 @@ public class FFmpegWrapperTest {
         });
 
         job.run();
+        Assertions.assertTrue(Files.exists(outFile), "Expected output not created: " + outFile);
     }
 }
