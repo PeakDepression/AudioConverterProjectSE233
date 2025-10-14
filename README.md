@@ -1,5 +1,9 @@
 # AudioConverterProjectSE233
 
+# Contributors
+- Nop Susri 672115026
+- Josh Michael Javier 672115504
+
 ## Requirements
 - Java 21, Maven 3.x
 - JavaFX modules pulled by Maven
