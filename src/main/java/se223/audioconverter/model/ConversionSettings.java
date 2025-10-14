@@ -7,9 +7,6 @@ public class ConversionSettings {
     private Channels channels;         // MONO/STEREO
     private OverwritePolicy overwritePolicy = OverwritePolicy.RENAME;
 
-    // Optional: for FLAC (or other formats with quality-level tuning)
-    private Integer flacCompressionLevel; // 0–8, null if not applicable
-
     // === Getters and Setters ===
     public AudioFormat getFormat() { return format; }
     public void setFormat(AudioFormat format) { this.format = format; }
@@ -26,6 +23,4 @@ public class ConversionSettings {
     public OverwritePolicy getOverwritePolicy() { return overwritePolicy; }
     public void setOverwritePolicy(OverwritePolicy overwritePolicy) { this.overwritePolicy = overwritePolicy; }
 
-    public Integer getFlacCompressionLevel() { return flacCompressionLevel; }
-    public void setFlacCompressionLevel(Integer flacCompressionLevel) { this.flacCompressionLevel = flacCompressionLevel; }
 }

@@ -114,8 +114,8 @@ public class MainController {
         overwriteCombo.getSelectionModel().select(OverwritePolicy.RENAME);
 
         // sample rates
-        sampleRateCombo.getItems().setAll(44_100, 48_000);
-        sampleRateCombo.getSelectionModel().select(Integer.valueOf(44_100));
+        sampleRateCombo.getItems().setAll(8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000);
+        sampleRateCombo.getSelectionModel().select(Integer.valueOf(8000));
 
         // channels
         monoRadio.setToggleGroup(channelGroup);
